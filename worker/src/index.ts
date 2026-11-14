@@ -7,6 +7,7 @@ import { Hono } from 'hono';
 import type { Context } from 'hono';
 import { APP_VERSION } from './utils/app-version';
 import { shortGitSha } from './utils/update-check';
+import { agentScriptRawUrl, resolveMonitorRepository } from './utils/monitor-repository';
 
 // 路由模块
 import { publicRoutes } from './routes/public';
@@ -59,6 +60,7 @@ type RuntimeBindings = {
   JWT_SECRET?: string;
   SETUP_DIAGNOSTICS_ENABLED?: string;
   CURRENT_GIT_COMMIT?: string;
+  CF_MONITOR_REPOSITORY?: string;
 };
 
 // Wrangler owns configured bindings; this adds runtime-only optional values.
@@ -310,9 +312,12 @@ app.use('/api/*', async (c, next) => {
   return undefined;
 });
 
-app.get('/agent/install.sh', (c) => c.redirect('https://raw.githubusercontent.com/kadidalax/cf-vps-monitor/main/agent/install.sh', 302));
-app.get('/agent/install-linux.sh', (c) => c.redirect('https://raw.githubusercontent.com/kadidalax/cf-vps-monitor/main/agent/install-linux.sh', 302));
-app.get('/agent/install-windows.ps1', (c) => c.redirect('https://raw.githubusercontent.com/kadidalax/cf-vps-monitor/main/agent/install-windows.ps1', 302));
+const agentScriptRedirect = (scriptFile: string) => (c: Context<{ Bindings: Bindings; Variables: Variables }>) =>
+  c.redirect(agentScriptRawUrl(resolveMonitorRepository(c.env.CF_MONITOR_REPOSITORY), scriptFile), 302);
+
+app.get('/agent/install.sh', agentScriptRedirect('install.sh'));
+app.get('/agent/install-linux.sh', agentScriptRedirect('install-linux.sh'));
+app.get('/agent/install-windows.ps1', agentScriptRedirect('install-windows.ps1'));
 
 // 公开 API，无认证
 app.route('/api/setup', setupRoutes);
