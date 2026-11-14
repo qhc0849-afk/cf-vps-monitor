@@ -1,3 +1,8 @@
+# Deployment configuration: the source of truth for what runs on Cloudflare.
+# worker/wrangler.toml (local `wrangler dev` / `wrangler types`) must match this
+# file except for main/assets paths and the workers_dev/preview_urls keys below.
+# worker/wrangler.example.toml must match worker/wrangler.toml exactly.
+# `npm run check:wrangler-configs` enforces this; update all three together.
 name = "cf-vps-monitor"
 main = "worker/src/index.ts"
 compatibility_date = "2026-06-21"
@@ -37,6 +42,7 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+CF_MONITOR_REPOSITORY = "kadidalax/cf-vps-monitor"
 
 [assets]
 directory = "frontend/dist"
