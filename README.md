@@ -42,6 +42,8 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 | `SUPABASE_URL`        | Variable | Supabase Project URL，例如 `https://xxxx.supabase.co`                    |
 | `SUPABASE_SECRET_KEY` | Secret   | Supabase Secret key，通常以 `sb_secret_` 开头；不要填写 Publishable key、anon key |
 | `JWT_SECRET`          | Secret   | 后台会话签名密钥，必须至少 32 字节；英文/数字不少于 32 个字符                                   |
+| `CF_MONITOR_REPOSITORY` | Variable | 可选，Agent 安装脚本与更新检测的 GitHub 仓库，默认 `kadidalax/cf-vps-monitor`；Fork 部署填自己的 `owner/repo` |
+| `SETUP_DIAGNOSTICS_ENABLED` | Variable | 可选，设为 `true` 时在尚未创建管理员的情况下，初始化状态接口返回完整诊断信息；设为 `false` 则只返回受限信息 |
 
 `SUPABASE_SERVICE_ROLE_KEY` 仅作为旧部署兼容变量保留；新部署请使用 `SUPABASE_SECRET_KEY`。
 
@@ -60,9 +62,13 @@ CF VPS Monitor 是一个轻量 VPS 探针面板，使用 Cloudflare Workers 承�
 6. 展开 **高级设置** 配置三个变量 `SUPABASE_URL`、`SUPABASE_SECRET_KEY`、`JWT_SECRET`。`JWT_SECRET` 必须至少 32 字节，英文/数字不少于 32 个字符。
 7. 保持默认 **构建命令** `npm run build`，将 **部署命令** 设置为 `npm run deploy`。
 8. 点击 **部署**。
-9. 如果 Cloudflare 里创建的 Worker 名称不是 `cf-vps-monitor`，需要同步修改 Fork 仓库的 `wrangler.toml` 里的 `name`，两者必须一致。
+9. 如果 Cloudflare 里创建的 Worker 名称不是 `cf-vps-monitor`，需要同步修改 Fork 仓库的 `wrangler.toml` 里的 `name`，两者必须一致。也可以不改配置，改为在部署命令里加 `--name <Worker 名称>`，或在构建变量里设置 `CF_WORKER_NAME=<Worker 名称>`，部署脚本会优先使用它们。
 10. 去 [Supabase](https://supabase.com/dashboard/account/tokens) 创建有效期 1 小时的 Access Token。
 11. 打开 `https://你的 Worker 域名/db-init` 初始化数据库，首次部署后访问 `/admin/login` 创建管理员。
+
+注意：Workers Builds 部署前会等待同一提交的 GitHub CI 通过。如果你的仓库是私有的，或者 GitHub API 匿名请求被限流（每小时 60 次），部署会直接失败。请在 **Settings → Build → Build Variables and Secrets** 里再加一个 Secret `GH_TOKEN`（私有仓库需要有仓库读权限的 token），部署门控会用它查询 CI 状态。等待超时默认 25 分钟，可用构建变量 `CF_MONITOR_CI_GATE_TIMEOUT_MS`（毫秒）调整。
+
+Fork 部署时，面板生成的 Agent 安装命令、`/agent/*` 安装脚本重定向和后台更新检测默认仍指向原仓库。如需指向你自己的 Fork：把三份 `wrangler.toml`（根目录、`worker/wrangler.toml`、`worker/wrangler.example.toml`）的 `[vars]` 里 `CF_MONITOR_REPOSITORY` 都改成你自己的 `owner/repo`（三份配置必须保持一致，CI 会用 `npm run check:wrangler-configs` 检查），并在构建变量里设置 `VITE_CF_MONITOR_REPOSITORY=你的用户名/cf-vps-monitor`，让前端安装命令也指向 Fork。安装脚本本身也支持用 `CF_MONITOR_REPOSITORY` 环境变量覆盖默认仓库。
 
 
 
@@ -95,6 +101,10 @@ npx wrangler secret put SUPABASE_SECRET_KEY
 npx wrangler secret put JWT_SECRET
 npm run deploy
 ```
+
+`npm run verify:cloudflare` 只做 dry-run 校验（打包、配置、绑定），不校验 Worker secrets 是否已配置；dry-run 通过不代表真实部署能通过 secret 检查，真实部署前仍需按上文配置 secrets。
+
+说明：`npm ci` 的 postinstall 会把 `node_modules/.bin/wrangler` 换成仓库自带的包装脚本，`wrangler deploy` / `wrangler versions upload` 会先跑验证门控再部署；`deploy --help` 这类帮助命令会直接透传给真实 wrangler，不触发门控。
 
 
 
@@ -143,7 +153,7 @@ wget -qO- 'https://raw.githubusercontent.com/kadidalax/cf-vps-monitor/refs/heads
 
 ## 后台一键同步更新
 
-后台固定检测 [kadidalax/cf-vps-monitor](https://github.com/kadidalax/cf-vps-monitor) `main` 分支的最新推送编码。进入后台 `关于 -> 版本更新`，保存“你的部署仓库地址”，以后检测到推送编码不一致时会显示同步入口。
+后台默认检测 [kadidalax/cf-vps-monitor](https://github.com/kadidalax/cf-vps-monitor) `main` 分支的最新推送编码（Fork 部署可通过 `CF_MONITOR_REPOSITORY` 变量改成自己的仓库，见上文 Fork 部署说明）。进入后台 `关于 -> 版本更新`，保存“你的部署仓库地址”，以后检测到推送编码不一致时会显示同步入口。
 
 ### 从 v2.0.2 升级到 v2.0.3
 
@@ -193,6 +203,7 @@ cd agent && go test ./...
 - 登录失败会记录限流状态和审计日志。
 - Agent 使用节点 Token 认证，后台可轮换节点 Token。
 - Ping 与网站探测会拦截内网、回环、链路本地、组播、保留地址和元数据地址。
+- 上述拦截基于主机名字面量判断，不解析 DNS；如果域名解析到内网地址（DNS rebinding），拦截可能被绕过。Ping 与网站探测目标仅管理员可配置。
 - Supabase 迁移启用 RLS，并对 RPC 函数显式 `revoke` / `grant`；需要 `security definer` 的函数固定 `search_path`。
 - 忘记密码重置需要输入当前部署的 Supabase Secret key；该 key 只用于本次请求校验，不会被保存。
 
