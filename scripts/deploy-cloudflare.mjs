@@ -15,7 +15,14 @@ const deployArgs = process.argv.slice(2);
 const isDryRun = deployArgs.includes('--dry-run');
 const isWorkersBuild = process.env.WORKERS_CI === '1';
 const keepsExistingVars = deployArgs.includes('--keep-vars');
-const wranglerDeployArgs = deployArgs.filter(arg => arg !== '--skip-migrations');
+// Wrangler has no --skip-migrations flag; silently dropping it would pretend
+// migrations were skipped. Fail fast instead of deploying under a false
+// assumption. All other arguments pass through to Wrangler, which validates
+// them itself.
+if (deployArgs.some(arg => arg === '--skip-migrations' || arg.startsWith('--skip-migrations='))) {
+  fail('Deployment stopped: --skip-migrations is not a supported flag. Durable Object migrations are declared in wrangler.toml and cannot be skipped per deploy.');
+}
+const wranglerDeployArgs = deployArgs;
 const deployCommand = process.env.CF_MONITOR_DEPLOY_COMMAND === 'versions-upload'
   ? ['versions', 'upload']
   : ['deploy'];
@@ -210,20 +217,25 @@ function buildWranglerDeployArgs() {
 writeDeployConfig();
 const hasDeploySecretsFile = writeDeploySecretsFile();
 
-if (isDryRun) {
-  const args = buildWranglerDeployArgs();
-  const deploy = runWrangler(args, { stdio: 'inherit' });
+// The secrets file must be removed even if the deploy subprocess fails or the
+// script throws afterwards. Exit through a single process.exit call after the
+// finally block: process.exit() inside try would skip cleanup. (checkSecrets
+// only runs when no secrets file was written, so its fail() path has nothing
+// to clean up.)
+let exitCode = 0;
+try {
+  if (isDryRun) {
+    const deploy = runWrangler(buildWranglerDeployArgs(), { stdio: 'inherit' });
+    exitCode = deploy.status ?? 1;
+  } else {
+    if (!keepsExistingVars && !hasDeploySecretsFile) {
+      checkSecrets();
+    }
+    console.log('Deploying Worker. Initialize the database after deploy at /db-init.');
+    const deploy = runWrangler(buildWranglerDeployArgs(), { stdio: 'inherit' });
+    exitCode = deploy.status ?? 1;
+  }
+} finally {
   if (hasDeploySecretsFile) rmSync(deploySecretsFile, { force: true });
-  process.exit(deploy.status ?? 1);
 }
-
-if (!keepsExistingVars && !hasDeploySecretsFile) {
-  checkSecrets();
-}
-
-console.log('Deploying Worker. Initialize the database after deploy at /db-init.');
-
-const args = buildWranglerDeployArgs();
-const deploy = runWrangler(args, { stdio: 'inherit' });
-if (hasDeploySecretsFile) rmSync(deploySecretsFile, { force: true });
-if (deploy.status !== 0) process.exit(deploy.status ?? 1);
+process.exit(exitCode);
