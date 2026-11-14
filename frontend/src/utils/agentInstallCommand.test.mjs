@@ -51,17 +51,16 @@ assert.equal(
 
 // Build-time injection: VITE_CF_MONITOR_REPOSITORY replaces the default repo
 // in install commands, and a blank value keeps the upstream default. The
-// substitution below stands in for Vite's static import.meta.env replacement.
+// substitution below stands in for Vite's static define replacement of the
+// __CF_MONITOR_REPOSITORY__ global (see vite.config.ts).
 for (const [injected, expected] of [
   ['example/my-fork', 'example/my-fork'],
   ['   ', 'kadidalax/cf-vps-monitor'],
 ]) {
   const injectedDir = await mkdtemp(join(tmpdir(), 'cf-monitor-agent-command-injected-'));
-  const injectedSource = projectLinksSource.replace(
-    'import.meta.env?.VITE_CF_MONITOR_REPOSITORY',
-    `({ VITE_CF_MONITOR_REPOSITORY: ${JSON.stringify(injected)} })?.VITE_CF_MONITOR_REPOSITORY`,
-  );
-  assert.equal(injectedSource.includes('import.meta.env?.VITE_CF_MONITOR_REPOSITORY'), false, 'the injection simulation must rewrite the code expression, not the comment');
+  assert.ok(projectLinksSource.includes('__CF_MONITOR_REPOSITORY__'), 'projectLinks.ts must read the build-time define');
+  const injectedSource = projectLinksSource.replaceAll('__CF_MONITOR_REPOSITORY__', JSON.stringify(injected));
+  assert.equal(injectedSource.includes('__CF_MONITOR_REPOSITORY__'), false, 'the injection simulation must rewrite the define, not leave it for the fallback');
   await writeFile(join(injectedDir, 'projectLinks.ts'), injectedSource);
   await writeFile(join(injectedDir, 'agentInstallCommand.ts'), commandSource.replace("from './projectLinks'", "from './projectLinks.ts'"));
   const injectedModule = await import(pathToFileURL(join(injectedDir, 'agentInstallCommand.ts')).href);
