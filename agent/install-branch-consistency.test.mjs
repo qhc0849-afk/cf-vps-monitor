@@ -34,17 +34,20 @@ function readConstant(source, pattern, label) {
 const targets = [
   {
     file: 'install.sh',
-    repo: /^CF_MONITOR_REPOSITORY="([^"]+)"/m,
+    // The assignment honors CF_MONITOR_REPOSITORY from the environment and
+    // falls back to the literal default; the lock reads the default.
+    repo: /^CF_MONITOR_REPOSITORY="(?:\$\{CF_MONITOR_REPOSITORY:-)?([^"$}]+)(?:\})?"/m,
     branch: /^CF_MONITOR_BRANCH="([^"]+)"/m,
   },
   {
     file: 'install-linux.sh',
-    repo: /^CF_MONITOR_REPOSITORY="([^"]+)"/m,
+    repo: /^CF_MONITOR_REPOSITORY="(?:\$\{CF_MONITOR_REPOSITORY:-)?([^"$}]+)(?:\})?"/m,
     branch: /^CF_MONITOR_BRANCH="([^"]+)"/m,
   },
   {
     file: 'install-windows.ps1',
-    repo: /^\$repository\s*=\s*"([^"]+)"/m,
+    // The default lives in $defaultRepository; $repository prefers $env:CF_MONITOR_REPOSITORY.
+    repo: /^\$defaultRepository\s*=\s*"([^"]+)"/m,
     branch: /^\$branch\s*=\s*"([^"]+)"/m,
   },
 ];
@@ -92,7 +95,9 @@ const frontendSource = readFileSync(
 );
 const frontendRepo = readConstant(
   frontendSource,
-  /CF_MONITOR_REPOSITORY\s*=\s*'([^']+)'/,
+  // projectLinks.ts honors the VITE_CF_MONITOR_REPOSITORY build variable and
+  // falls back to the literal default; the lock reads the default.
+  /CF_MONITOR_REPOSITORY = [^'\n]*: '([^']+)'/,
   '前端的仓库常量',
 );
 assert.equal(
