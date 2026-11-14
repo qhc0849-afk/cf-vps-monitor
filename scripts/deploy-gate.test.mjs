@@ -7,12 +7,13 @@ import { fileURLToPath } from 'node:url';
 const deploymentUrl = new URL('./deploy-cloudflare.mjs', import.meta.url);
 const deploymentSource = await readFile(deploymentUrl, 'utf8');
 
-function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus = 0, args = [], preparationFails = false, env = {}, checkoutChangesDuringBuild = false } = {}) {
+function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus = 0, deployStatus = 0, args = [], preparationFails = false, env = {}, checkoutChangesDuringBuild = false } = {}) {
   const imports = deploymentSource.match(/^import .+;\r?$/gm) || [];
   assert.ok(imports.length >= 4, 'execute the actual deploy script with explicit I/O replacements');
   const source = deploymentSource.replace(/^import .+;\r?$/gm, '').replaceAll('import.meta.url', JSON.stringify(deploymentUrl.href));
   const calls = [];
   const writes = [];
+  const removed = [];
   class Exit extends Error { constructor(status) { super('fixture process exit'); this.status = status; } }
   const fakeProcess = { platform: process.platform, execPath: process.execPath, argv: ['node', fileURLToPath(deploymentUrl), ...args],
     env: { SUPABASE_URL: 'https://synthetic.supabase.co', JWT_SECRET: 'synthetic-jwt-secret', SUPABASE_SECRET_KEY: 'sb_secret_synthetic', ...env },
@@ -23,7 +24,7 @@ function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus =
     if (argv[0]?.endsWith('github-ci-gate.mjs')) return { status: ciGateStatus, stdout: '', stderr: '' };
     if (command === 'git' && argv[0] === 'diff') return { status: checkoutChangesDuringBuild ? 1 : 0, stdout: '', stderr: '' };
     if (command === 'git') return { status: 0, stdout: 'a'.repeat(40), stderr: '' };
-    if (argv[0]?.endsWith('wrangler.js')) return { status: 0, stdout: '[]', stderr: '' };
+    if (argv[0]?.endsWith('wrangler.js')) return { status: deployStatus, stdout: '[]', stderr: '' };
     throw new Error(`Unexpected fixture command: ${command}`);
   };
   let status = 0;
@@ -31,12 +32,12 @@ function runDeployment({ verificationStatus = 0, ciGateStatus = 0, buildStatus =
     new Function('mkdirSync', 'readFileSync', 'rmSync', 'writeFileSync', 'dirname', 'join', 'fileURLToPath', 'spawnSync', 'process', 'console', 'prepareCloudflareVerificationEnv', source)(
       path => writes.push(path),
       () => 'name = "synthetic-worker"\nmain = "worker/src/index.ts"\n[vars]\nSUPABASE_URL = "https://PROJECT_REF.supabase.co"\n',
-      path => writes.push(path), path => writes.push(path), dirname, join, fileURLToPath, spawn, fakeProcess,
+      path => removed.push(path), path => writes.push(path), dirname, join, fileURLToPath, spawn, fakeProcess,
       { log() {}, error() {} },
       () => { if (preparationFails) throw new Error('Synthetic tool preparation failure'); return fakeProcess.env; },
     );
   } catch (error) { if (!(error instanceof Exit)) throw error; status = error.status; }
-  return { status, calls, writes };
+  return { status, calls, writes, removed };
 }
 
 test('AUD-19 behavior-test failure stops deployment before configuration or Wrangler side effects', () => {
@@ -67,6 +68,25 @@ test('AUD-19 local dry-run remains a build inspection without publishing or recu
   assert.equal(result.status, 0);
   assert.equal(result.calls.some(call => call.args.join(' ') === 'run verify'), false);
   assert.ok(result.calls.find(call => call.args.includes('deploy')).args.includes('--dry-run'));
+});
+
+test('--skip-migrations is rejected before verification, configuration, or Wrangler side effects', () => {
+  for (const args of [['--skip-migrations'], ['--dry-run', '--skip-migrations=true']]) {
+    const result = runDeployment({ args });
+    assert.notEqual(result.status, 0, '--skip-migrations must fail fast instead of being silently dropped');
+    assert.equal(result.calls.length, 0);
+    assert.equal(result.writes.length, 0);
+    assert.equal(result.removed.length, 0);
+  }
+});
+
+test('the temporary secrets file is removed whether the deploy succeeds or fails', () => {
+  const secretsFile = join(dirname(fileURLToPath(deploymentUrl)), '..', 'worker', '.tmp', 'wrangler-secrets.json');
+  for (const deployStatus of [0, 1]) {
+    const result = runDeployment({ deployStatus });
+    assert.equal(result.status, deployStatus);
+    assert.deepEqual(result.removed, [secretsFile]);
+  }
 });
 
 test('Workers Builds reuses successful commit CI before building and publishing without rerunning tests', () => {

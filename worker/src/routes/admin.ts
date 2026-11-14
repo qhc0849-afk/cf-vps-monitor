@@ -27,6 +27,7 @@ import {
 import { buildBackupSnapshot } from '../utils/backup-snapshot';
 import { measureRestoredClientSnapshot } from '../utils/restore-client-snapshot';
 import { getCloudflareClientIp } from '../utils/request-ip';
+import { resolveMonitorRepository } from '../utils/monitor-repository';
 import { validatePingTaskInput } from '../utils/ping-task';
 import { generateAgentToken, validateClientCreateInput, validateClientUpdateInput } from '../utils/client';
 import { validateExpiryNotificationInput, validateLoadNotificationInput, validateOfflineNotificationInput } from '../utils/notification';
@@ -92,7 +93,6 @@ const ADMIN_PING_TASKS_EDGE_CACHE_SECONDS = 15;
 const ADMIN_SETTINGS_SCOPE_CACHE_MS = 10_000;
 const HEALTH_CACHE_MS = 30_000;
 const ALLOWED_CLIENT_IDS_CACHE_MS = 30_000;
-const OFFICIAL_UPDATE_REPOSITORY = 'kadidalax/cf-vps-monitor';
 const OFFICIAL_UPDATE_BRANCH = 'main';
 const UPDATE_CHECK_CACHE_MS = 10 * 60 * 1000;
 const updateCheckCache = new Map<string, { expiresAt: number; value: UpdateCheckResult }>();
@@ -1434,7 +1434,7 @@ adminRoutes.get('/update-check', async (c) => {
   const now = Date.now();
   try {
     const { repositoryUrl } = await getUpdateSettings(c);
-    const repository = OFFICIAL_UPDATE_REPOSITORY;
+    const repository = resolveMonitorRepository(c.env.CF_MONITOR_REPOSITORY);
     const currentCommit = normalizeGitSha(c.env.CURRENT_GIT_COMMIT);
     const cacheKey = `${repository}:${OFFICIAL_UPDATE_BRANCH}:commit:${repositoryUrl}:${currentCommit}`;
     const cached = updateCheckCache.get(cacheKey);

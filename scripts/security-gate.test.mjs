@@ -34,6 +34,11 @@ async function fixture({ npm = cleanNpm, go = cleanGo, commands = ['npm run veri
       const nodeStep = /^node (\S+\.mjs)$/.exec(step.trim());
       assert.ok(nodeStep, `fixture must execute the actual supported command: ${step}`);
       const module = await import(new URL(nodeStep[1], root));
+      // Only the security check gates publication here; other CI checks (for
+      // example the Wrangler configuration consistency check) run their own
+      // assertions in their own tests and must not be mistaken for scanners.
+      // The calls.length assertions below still require both scanners to run.
+      if (typeof module.runSecurityChecks !== 'function') continue;
       await module.runSecurityChecks({ run, log() {} });
     }
   }

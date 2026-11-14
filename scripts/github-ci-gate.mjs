@@ -7,6 +7,7 @@ const defaultRoot = dirname(dirname(modulePath));
 const commitPattern = /^[a-f0-9]{40}$/i;
 const pendingStatuses = new Set(['queued', 'in_progress', 'requested', 'waiting', 'pending']);
 const conclusions = new Set(['success', 'failure', 'cancelled', 'skipped', 'timed_out', 'neutral', 'action_required', 'stale', 'startup_failure']);
+const DEFAULT_GATE_TIMEOUT_MS = 25 * 60_000;
 
 class GithubCiGateError extends Error {
   constructor(code, message) {
@@ -18,6 +19,25 @@ class GithubCiGateError extends Error {
 
 function fail(code, message) {
   throw new GithubCiGateError(code, message);
+}
+
+/**
+ * Resolve the total CI wait budget. An explicit timeoutMs wins; otherwise
+ * CF_MONITOR_CI_GATE_TIMEOUT_MS overrides the default so slower CI runs can
+ * wait longer without a code change. Unset means the default 25 minutes.
+ */
+function resolveGateTimeoutMs(timeoutMs, env) {
+  if (timeoutMs !== undefined) return timeoutMs;
+  const raw = env?.CF_MONITOR_CI_GATE_TIMEOUT_MS;
+  if (raw === undefined || raw === '') return DEFAULT_GATE_TIMEOUT_MS;
+  if (typeof raw !== 'string' || !/^\d+$/.test(raw.trim())) {
+    fail('INVALID_OPTIONS', 'CF_MONITOR_CI_GATE_TIMEOUT_MS must be a positive integer number of milliseconds.');
+  }
+  const parsed = Number(raw.trim());
+  if (!Number.isSafeInteger(parsed) || parsed <= 0) {
+    fail('INVALID_OPTIONS', 'CF_MONITOR_CI_GATE_TIMEOUT_MS must be a positive integer number of milliseconds.');
+  }
+  return parsed;
 }
 
 function repositoryFromRemote(raw) {
@@ -84,19 +104,20 @@ export async function runGithubCiGate({
   sleep = ms => new Promise(resolveSleep => setTimeout(resolveSleep, ms)),
   now = Date.now,
   log = console.log,
-  timeoutMs = 12 * 60_000,
+  timeoutMs = undefined,
   pollMs = 30_000,
 } = {}) {
   try {
     if (typeof root !== 'string' || !root || !env || typeof env !== 'object'
         || ![run, fetchImpl, sleep, now, log].every(fn => typeof fn === 'function')
-        || !Number.isSafeInteger(timeoutMs) || timeoutMs <= 0
+        || !(timeoutMs === undefined || (Number.isSafeInteger(timeoutMs) && timeoutMs > 0))
         || !Number.isSafeInteger(pollMs) || pollMs <= 0) {
       fail('INVALID_OPTIONS', 'invalid checkout, I/O, or wait configuration.');
     }
+    const resolvedTimeoutMs = resolveGateTimeoutMs(timeoutMs, env);
     const startedAt = now();
     if (!Number.isFinite(startedAt)) fail('INVALID_OPTIONS', 'the wait clock is unavailable.');
-    const deadline = startedAt + timeoutMs;
+    const deadline = startedAt + resolvedTimeoutMs;
     const git = args => {
       let result;
       try {
@@ -141,6 +162,12 @@ export async function runGithubCiGate({
         response = await fetchImpl(url.href, { method: 'GET', headers, signal, redirect: 'error', cache: 'no-store' });
       } catch { fail('NETWORK_ERROR', 'the GitHub request failed or timed out; deployment stopped.'); }
       if (!Number.isInteger(response?.status)) fail('INVALID_RESPONSE', 'GitHub returned an invalid HTTP response.');
+      if (response.status === 403) {
+        fail('HTTP_ERROR', 'GitHub returned HTTP 403, which usually means the API rate limit was reached (60 requests per hour without a token) or a private repository was requested without access. Configure GH_TOKEN in the Workers Builds build secrets and retry; deployment stopped.');
+      }
+      if (response.status === 404) {
+        fail('HTTP_ERROR', 'GitHub returned HTTP 404, which usually means the repository does not exist or a private repository was requested without access. Configure GH_TOKEN with repository read access in the Workers Builds build secrets and retry; deployment stopped.');
+      }
       if (response.status !== 200) fail('HTTP_ERROR', `GitHub returned HTTP ${response.status}; deployment stopped.`);
       let payload;
       try { payload = await response.json(); } catch {

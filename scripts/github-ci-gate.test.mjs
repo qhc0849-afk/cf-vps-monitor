@@ -118,12 +118,56 @@ for (const remote of [
   });
 }
 
-test('missing CI exhausts the bounded twelve-minute wait without falling back to verification', async () => {
+test('missing CI exhausts the bounded twenty-five-minute wait without falling back to verification', async () => {
   const f = fixture({ replies: [response([])] });
   await assert.rejects(f.execute(), { code: 'WAIT_TIMEOUT' });
-  assert.equal(f.elapsed(), 720_000);
-  assert.equal(f.calls.http.length, 24);
+  assert.equal(f.elapsed(), 1_500_000);
+  assert.equal(f.calls.http.length, 50);
   assert.ok(f.calls.sleeps.every(ms => ms === 30_000));
+});
+
+test('CF_MONITOR_CI_GATE_TIMEOUT_MS overrides the default wait budget', async () => {
+  const f = fixture({ env: { CF_MONITOR_CI_GATE_TIMEOUT_MS: '60000' }, replies: [response([])] });
+  await assert.rejects(f.execute(), { code: 'WAIT_TIMEOUT' });
+  assert.equal(f.elapsed(), 60_000);
+  assert.equal(f.calls.http.length, 2);
+});
+
+test('an explicit timeoutMs wins over CF_MONITOR_CI_GATE_TIMEOUT_MS', async () => {
+  const f = fixture({ env: { CF_MONITOR_CI_GATE_TIMEOUT_MS: '60000' }, timeoutMs: 75_000, replies: [response([])] });
+  await assert.rejects(f.execute(), { code: 'WAIT_TIMEOUT' });
+  assert.equal(f.elapsed(), 75_000);
+});
+
+for (const value of ['not-a-number', '0', '-5000', '12.5', '99999999999999999999']) {
+  test(`invalid CF_MONITOR_CI_GATE_TIMEOUT_MS (${value}) fails before any HTTP request`, async () => {
+    const f = fixture({ env: { CF_MONITOR_CI_GATE_TIMEOUT_MS: value } });
+    await assert.rejects(f.execute(), { code: 'INVALID_OPTIONS' });
+    assert.equal(f.calls.http.length, 0);
+  });
+}
+
+test('HTTP 403 explains rate limiting and private-repository access instead of a bare status', async () => {
+  const f = fixture({ replies: [{ status: 403, json: async () => ({}) }] });
+  await assert.rejects(f.execute(), error => {
+    assert.equal(error.code, 'HTTP_ERROR');
+    assert.match(error.message, /rate limit/i);
+    assert.match(error.message, /GH_TOKEN/);
+    assert.match(error.message, /private repository/i);
+    return true;
+  });
+  assert.equal(f.calls.http.length, 1);
+});
+
+test('HTTP 404 explains the missing repository or missing authorization instead of a bare status', async () => {
+  const f = fixture({ replies: [{ status: 404, json: async () => ({}) }] });
+  await assert.rejects(f.execute(), error => {
+    assert.equal(error.code, 'HTTP_ERROR');
+    assert.match(error.message, /does not exist/i);
+    assert.match(error.message, /GH_TOKEN with repository read access/);
+    return true;
+  });
+  assert.equal(f.calls.http.length, 1);
 });
 
 test('the last polling sleep cannot exceed the remaining deadline', async () => {
@@ -295,13 +339,13 @@ for (const error of [new Error('synthetic network failure'), new DOMException('s
 }
 
 test('a response arriving after the total deadline cannot authorize deployment', async () => {
-  const f = fixture({ replies: [({ advance }) => { advance(720_001); return response([workflow()]); }] });
+  const f = fixture({ replies: [({ advance }) => { advance(1_500_001); return response([workflow()]); }] });
   await assert.rejects(f.execute(), { code: 'WAIT_TIMEOUT' });
 });
 
 test('a final checkout check that exhausts the deadline cannot authorize deployment', async () => {
   const f = fixture({ head: count => {
-    if (count > 1) f.advance(720_001);
+    if (count > 1) f.advance(1_500_001);
     return SHA;
   } });
   await assert.rejects(f.execute(), { code: 'WAIT_TIMEOUT' });

@@ -1,3 +1,8 @@
+# Local development configuration for `wrangler dev` and `wrangler types`.
+# Must match the root wrangler.toml except for main/assets paths (relative to
+# this directory) and the workers_dev/preview_urls keys, which only the root
+# deployment config declares. worker/wrangler.example.toml must match this file
+# exactly. `npm run check:wrangler-configs` enforces this; update all three together.
 name = "cf-vps-monitor"
 main = "src/index.ts"
 compatibility_date = "2026-06-21"
@@ -35,6 +40,7 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+CF_MONITOR_REPOSITORY = "kadidalax/cf-vps-monitor"
 
 [assets]
 directory = "../frontend/dist"

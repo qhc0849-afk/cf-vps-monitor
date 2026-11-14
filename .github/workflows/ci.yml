@@ -42,6 +42,11 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      # The root, worker, and example Wrangler configs must stay in sync;
+      # only main/assets paths and workers_dev/preview_urls may differ.
+      - name: Check Wrangler configuration consistency
+        run: npm run check:wrangler-configs
+
       - name: Build
         run: npm run build
 
