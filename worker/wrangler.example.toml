@@ -39,7 +39,7 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
-CF_MONITOR_REPOSITORY = "kadidalax/cf-vps-monitor"
+CF_MONITOR_REPOSITORY = "qhc0849-afk/cf-vps-monitor"
 
 [assets]
 directory = "../frontend/dist"
