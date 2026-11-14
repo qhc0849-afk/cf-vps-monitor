@@ -2,7 +2,5 @@
 
 declare const __BUILD_TIME__: string;
 
-interface ImportMetaEnv {
-  /** Build-time override for the repository used in install commands; see projectLinks.ts. */
-  readonly VITE_CF_MONITOR_REPOSITORY?: string;
-}
+/** Build-time repository override injected by vite.config.ts; see projectLinks.ts. */
+declare const __CF_MONITOR_REPOSITORY__: string;
