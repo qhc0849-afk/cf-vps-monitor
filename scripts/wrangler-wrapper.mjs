@@ -7,11 +7,21 @@ const root = dirname(dirname(fileURLToPath(import.meta.url)));
 const managedDeploy = join(root, 'scripts', 'deploy-cloudflare.mjs');
 const realWrangler = join(root, 'node_modules', 'wrangler', 'bin', 'wrangler.js');
 
+const HELP_FLAGS = new Set(['--help', '-h', '--version']);
+
+// Help and version requests must reach real Wrangler directly: routing them
+// through the managed deploy entrypoint would run full verification instead
+// of printing help. Bare `help`/`version` only count in the first position so
+// a value such as `--name help` still deploys.
+function isHelpRequest(subArgs) {
+  return subArgs.some(arg => HELP_FLAGS.has(arg)) || subArgs[0] === 'help' || subArgs[0] === 'version';
+}
+
 export function resolveWrapperCommand(args) {
-  if (args[0] === 'deploy') {
+  if (args[0] === 'deploy' && !isHelpRequest(args.slice(1))) {
     return { type: 'managed-deploy', mode: 'deploy', args: args.slice(1) };
   }
-  if (args[0] === 'versions' && args[1] === 'upload') {
+  if (args[0] === 'versions' && args[1] === 'upload' && !isHelpRequest(args.slice(2))) {
     return { type: 'managed-deploy', mode: 'versions-upload', args: args.slice(2) };
   }
   return { type: 'passthrough', args };
