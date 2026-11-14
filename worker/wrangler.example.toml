@@ -1,3 +1,7 @@
+# Documented copy of worker/wrangler.toml. Must match worker/wrangler.toml
+# exactly; `npm run check:wrangler-configs` enforces this. Edit
+# worker/wrangler.toml (and the root wrangler.toml) first, then copy the result
+# here, keeping this header.
 name = "cf-vps-monitor"
 main = "src/index.ts"
 compatibility_date = "2026-06-21"
@@ -10,6 +14,9 @@ head_sampling_rate = 1
 [observability.logs]
 invocation_logs = true
 head_sampling_rate = 1
+
+[placement]
+mode = "smart"
 
 [triggers]
 crons = ["*/2 * * * *"]
@@ -32,6 +39,7 @@ new_sqlite_classes = ["RateLimitDO"]
 
 [vars]
 SUPABASE_URL = "https://PROJECT_REF.supabase.co"
+CF_MONITOR_REPOSITORY = "kadidalax/cf-vps-monitor"
 
 [assets]
 directory = "../frontend/dist"
